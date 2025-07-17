@@ -19,4 +19,8 @@ router.get('/:id', c.get);
 // PUT /prompts/:id
 router.put('/:id', c.update);
 
+// Remove a Prompt by its ID
+// DELETE /prompts/:id
+router.delete('/:id', c.remove);
+
 module.exports = router;
