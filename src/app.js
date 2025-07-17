@@ -10,9 +10,15 @@ app.use(express.json());
 app.use('/prompts', promptRoutes);
 app.use(notFound);
 
-(async () => {
+const start = async () => {
   await sequelize.authenticate();
-  await sequelize.sync();      
+  await sequelize.sync();
   const PORT = process.env.PORT || 3000;
-  app.listen(PORT, () => console.log(`API running at http://localhost:${PORT}`));
-})();
+  return app.listen(PORT, () => console.log(`API running at http://localhost:${PORT}`));
+};
+
+if (require.main === module) {
+  start();
+}
+
+module.exports = { app, start };
