@@ -6,7 +6,7 @@ const sequelize = require('../src/config/database');
 
 beforeAll(async () => {
   await sequelize.authenticate();
-  await sequelize.sync();
+  await request(app).get('/api/migrate');
 });
 
 afterAll(async () => {
