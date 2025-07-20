@@ -6,7 +6,7 @@ const sequelize = require('../src/config/database');
 
 beforeAll(async () => {
   await sequelize.authenticate();
-  await sequelize.sync();
+  await request(app).get('/api/migrate');
 });
 
 afterAll(async () => {
@@ -14,22 +14,31 @@ afterAll(async () => {
 });
 
 describe('Prompt API', () => {
-  it('creates and retrieves a prompt', async () => {
+  it('creates and retrieves a prompt with tags', async () => {
+    const tags = [
+      { name: 'tag1', category: 'model' },
+      { name: 'tag2', category: 'task' },
+    ];
     const createRes = await request(app)
       .post('/prompts')
-      .send({ title: 'Hello', body: 'World', tags: ['tag1', 'tag2'] })
+      .send({ title: 'Hello', body: 'World', tags })
       .expect(201);
 
     const { id } = createRes.body;
 
+    expect(createRes.body.tags).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining(tags[0]),
+        expect.objectContaining(tags[1]),
+      ])
+    );
+
     const getRes = await request(app).get(`/prompts/${id}`).expect(200);
-    expect(getRes.body).toEqual(
-      expect.objectContaining({
-        id,
-        title: 'Hello',
-        body: 'World',
-        tags: 'tag1,tag2',
-      })
+    expect(getRes.body.tags).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining(tags[0]),
+        expect.objectContaining(tags[1]),
+      ])
     );
   });
 });
