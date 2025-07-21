@@ -2,6 +2,7 @@ const { Router } = require('express');
 const sequelize = require('../config/database');
 require('../models/prompt.model');
 require('../models/tag.model');
+require('../models/promptVersion.model');
 
 const router = Router();
 

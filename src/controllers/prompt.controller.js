@@ -38,3 +38,39 @@ exports.remove = async (req, res, next) => {
     res.status(204).end();
   } catch (e) { next(e); }
 };
+
+exports.listVersions = async (req, res, next) => {
+  try {
+    const versions = await service.getVersions(req.params.id, req.query.branch);
+    res.json(versions);
+  } catch (e) { next(e); }
+};
+
+exports.getVersion = async (req, res, next) => {
+  try {
+    const version = await service.reconstructVersion(req.params.versionId);
+    if (!version) return res.status(404).send('Not Found');
+    res.json(version);
+  } catch (e) { next(e); }
+};
+
+exports.restoreVersion = async (req, res, next) => {
+  try {
+    const content = await service.reconstructVersion(req.params.versionId);
+    if (!content) return res.status(404).send('Not Found');
+    const updated = await service.update(req.params.id, content);
+    res.json(updated);
+  } catch (e) { next(e); }
+};
+
+exports.branch = async (req, res, next) => {
+  try {
+    const versions = await service.createBranch(
+      req.params.id,
+      req.body.fromVersionId,
+      req.body.branchName
+    );
+    if (!versions) return res.status(404).send('Not Found');
+    res.status(201).json(versions);
+  } catch (e) { next(e); }
+};
