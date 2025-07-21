@@ -1,6 +1,7 @@
 const express = require('express');
 require('dotenv').config();
 const sequelize = require('./config/database');
+require('./models/promptVersion.model');
 const promptRoutes = require('./routes/prompt.routes');
 const migrateRoutes = require('./routes/migrate.routes');
 const notFound = require('./middlewares/notFound');

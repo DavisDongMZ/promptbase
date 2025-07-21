@@ -41,4 +41,28 @@ describe('Prompt API', () => {
       ])
     );
   });
+
+  it('tracks versions and restores a previous one', async () => {
+    const createRes = await request(app)
+      .post('/prompts')
+      .send({ title: 'v1', body: 'body1' })
+      .expect(201);
+
+    const { id } = createRes.body;
+
+    await request(app)
+      .put(`/prompts/${id}`)
+      .send({ title: 'v2', body: 'body2' })
+      .expect(200);
+
+    const versions = await request(app)
+      .get(`/prompts/${id}/versions`)
+      .expect(200);
+    expect(versions.body.length).toBe(2);
+
+    const restoreRes = await request(app)
+      .post(`/prompts/${id}/versions/${versions.body[0].id}/restore`)
+      .expect(200);
+    expect(restoreRes.body.title).toBe('v1');
+  });
 });

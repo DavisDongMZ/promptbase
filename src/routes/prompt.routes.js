@@ -19,6 +19,18 @@ router.get('/:id', c.get);
 // PUT /prompts/:id
 router.put('/:id', c.update);
 
+// List versions
+router.get('/:id/versions', c.listVersions);
+
+// Get a reconstructed version
+router.get('/:id/versions/:versionId', c.getVersion);
+
+// Restore to a version
+router.post('/:id/versions/:versionId/restore', c.restoreVersion);
+
+// Create a new branch
+router.post('/:id/branches', c.branch);
+
 // Remove a Prompt by its ID
 // DELETE /prompts/:id
 router.delete('/:id', c.remove);
