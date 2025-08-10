@@ -3,6 +3,7 @@ const sequelize = require('../config/database');
 require('../models/prompt.model');
 require('../models/tag.model');
 require('../models/promptVersion.model');
+require('../models/promptStat.model');
 
 const router = Router();
 

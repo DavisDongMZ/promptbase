@@ -1,7 +1,9 @@
 const Prompt = require('../models/prompt.model');
 const Tag = require('../models/tag.model');
 const PromptVersion = require('../models/promptVersion.model');
+const PromptStat = require('../models/promptStat.model');
 const diff_match_patch = require('diff-match-patch');
+const sequelize = require('../config/database');
 const dmp = new diff_match_patch();
 
 const SNAPSHOT_INTERVAL = 10;
@@ -17,6 +19,11 @@ exports.create = async (data) => {
     snapshot_body: prompt.body,
     is_snapshot: true,
     branch: 'main',
+  });
+  // 初始化统计行
+  await PromptStat.findOrCreate({
+    where: { prompt_id: prompt.id },
+    defaults: { likes: 0, uses: 0, rating_sum: 0, rating_count: 0 },
   });
   if (tags.length) {
     const tagInstances = [];
@@ -36,10 +43,39 @@ exports.create = async (data) => {
   return exports.getById(prompt.id);
 };
 
-exports.getById = (id) => Prompt.findByPk(id, { include: includeTags });
+exports.getById = (id) =>
+  Prompt.findByPk(id, { include: [includeTags, { model: PromptStat, as: 'stat' }] });
 
-exports.list = (offset = 0, limit = 20) =>
-  Prompt.findAll({ offset, limit, order: [['created_at', 'DESC']], include: includeTags });
+/**
+ * 列表排序：
+ *  - hot：根据 likes、uses、rating_avg 组合排序
+ *  - rating：评分优先
+ *  - new：按创建时间
+ */
+exports.list = (offset = 0, limit = 20, sort = 'hot') => {
+  // 评分平均值
+  const ratingAvg =
+    'CASE WHEN stat.rating_count > 0 THEN 1.0 * stat.rating_sum / stat.rating_count ELSE 0 END';
+  // 热度得分（可按需调整系数）
+  const hotScore = `COALESCE(stat.likes,0) * 2 + COALESCE(stat.uses,0) + (${ratingAvg}) * 3`;
+
+  let order;
+  if (sort === 'rating') {
+    order = [[sequelize.literal(ratingAvg), 'DESC'], ['created_at', 'DESC']];
+  } else if (sort === 'new') {
+    order = [['created_at', 'DESC']];
+  } else {
+    order = [[sequelize.literal(hotScore), 'DESC'], ['created_at', 'DESC']];
+  }
+
+  return Prompt.findAll({
+    offset,
+    limit,
+    include: [includeTags, { model: PromptStat, as: 'stat' }],
+    order,
+    subQuery: false,
+  });
+};
 
 exports.getVersionById = (id) => PromptVersion.findByPk(id);
 
@@ -138,4 +174,35 @@ exports.createBranch = async (promptId, fromVersionId, branchName) => {
     is_snapshot: true,
   });
   return exports.getVersions(promptId, branchName);
+};
+
+// -------- 统计写入 API --------
+async function ensureStat(promptId) {
+  const [stat] = await PromptStat.findOrCreate({
+    where: { prompt_id: promptId },
+    defaults: { likes: 0, uses: 0, rating_sum: 0, rating_count: 0 },
+  });
+  return stat;
+}
+
+exports.addLike = async (id) => {
+  const stat = await ensureStat(id);
+  await stat.increment('likes', { by: 1 });
+  return exports.getById(id);
+};
+
+exports.addUse = async (id) => {
+  const stat = await ensureStat(id);
+  await stat.increment('uses', { by: 1 });
+  return exports.getById(id);
+};
+
+exports.addRating = async (id, score) => {
+  const s = Number(score);
+  if (!Number.isFinite(s) || s < 1 || s > 5) {
+    throw new Error('score must be an integer in [1,5]');
+  }
+  const stat = await ensureStat(id);
+  await stat.increment({ rating_sum: s, rating_count: 1 });
+  return exports.getById(id);
 };
