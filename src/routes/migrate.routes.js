@@ -4,6 +4,7 @@ require('../models/prompt.model');
 require('../models/tag.model');
 require('../models/promptVersion.model');
 require('../models/promptStat.model');
+require('../models/bundle.model');
 
 const router = Router();
 

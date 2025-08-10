@@ -4,6 +4,8 @@ const PromptVersion = require('../models/promptVersion.model');
 const PromptStat = require('../models/promptStat.model');
 const diff_match_patch = require('diff-match-patch');
 const sequelize = require('../config/database');
+const { Op } = require('sequelize');
+const { generateTags, normalizeTagName } = require('../utils/tagger');
 const dmp = new diff_match_patch();
 
 const SNAPSHOT_INTERVAL = 10;
@@ -25,17 +27,22 @@ exports.create = async (data) => {
     where: { prompt_id: prompt.id },
     defaults: { likes: 0, uses: 0, rating_sum: 0, rating_count: 0 },
   });
-  if (tags.length) {
+  const autoTags = generateTags(promptData);
+  const tagMap = new Map();
+  for (const t of tags) {
+    if (typeof t === 'string') {
+      tagMap.set(normalizeTagName(t), 'general');
+    } else {
+      tagMap.set(normalizeTagName(t.name), t.category || 'general');
+    }
+  }
+  for (const name of autoTags) {
+    if (!tagMap.has(name)) tagMap.set(name, 'auto');
+  }
+  if (tagMap.size) {
     const tagInstances = [];
-    for (const t of tags) {
-      let tag;
-      if (typeof t === 'string') {
-        [tag] = await Tag.findOrCreate({ where: { name: t, category: 'general' } });
-      } else {
-        [tag] = await Tag.findOrCreate({
-          where: { name: t.name, category: t.category || 'general' },
-        });
-      }
+    for (const [name, category] of tagMap.entries()) {
+      const [tag] = await Tag.findOrCreate({ where: { name, category } });
       tagInstances.push(tag);
     }
     await prompt.addTags(tagInstances);
@@ -74,6 +81,27 @@ exports.list = (offset = 0, limit = 20, sort = 'hot') => {
     include: [includeTags, { model: PromptStat, as: 'stat' }],
     order,
     subQuery: false,
+  });
+};
+
+exports.search = (keyword, tags = [], limit = 20, offset = 0) => {
+  const where = {};
+  if (keyword) {
+    where[Op.or] = [
+      { title: { [Op.like]: `%${keyword}%` } },
+      { body: { [Op.like]: `%${keyword}%` } },
+    ];
+  }
+  const tagInclude = { model: Tag, as: 'tags', through: { attributes: [] } };
+  if (tags.length) {
+    tagInclude.where = { name: tags.map(normalizeTagName) };
+    tagInclude.required = true;
+  }
+  return Prompt.findAll({
+    where,
+    include: [tagInclude, { model: PromptStat, as: 'stat' }],
+    limit,
+    offset,
   });
 };
 
@@ -143,16 +171,21 @@ exports.update = async (id, data) => {
     is_snapshot: isSnapshot,
   });
   if (tags) {
-    const tagInstances = [];
+    const autoTags = generateTags({ ...prompt.toJSON(), ...promptData });
+    const tagMap = new Map();
     for (const t of tags) {
-      let tag;
       if (typeof t === 'string') {
-        [tag] = await Tag.findOrCreate({ where: { name: t, category: 'general' } });
+        tagMap.set(normalizeTagName(t), 'general');
       } else {
-        [tag] = await Tag.findOrCreate({
-          where: { name: t.name, category: t.category || 'general' },
-        });
+        tagMap.set(normalizeTagName(t.name), t.category || 'general');
       }
+    }
+    for (const name of autoTags) {
+      if (!tagMap.has(name)) tagMap.set(name, 'auto');
+    }
+    const tagInstances = [];
+    for (const [name, category] of tagMap.entries()) {
+      const [tag] = await Tag.findOrCreate({ where: { name, category } });
       tagInstances.push(tag);
     }
     await prompt.setTags(tagInstances);
