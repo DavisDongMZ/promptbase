@@ -1,11 +1,12 @@
 const { Router } = require('express');
 const c = require('../controllers/prompt.controller');
+const moderation = require('../middlewares/moderation');
 
 const router = Router();
 
 // Create a new Prompt
 // POST /prompts
-router.post('/', c.create);
+router.post('/', moderation, c.create);
 
 // List all Prompts (with optional pagination via query params ?page=&size=)
 // GET /prompts
@@ -17,7 +18,7 @@ router.get('/:id', c.get);
 
 // Replace an existing Prompt completely by its ID
 // PUT /prompts/:id
-router.put('/:id', c.update);
+router.put('/:id', moderation, c.update);
 
 // --- Stats APIs ---
 // POST /prompts/:id/like

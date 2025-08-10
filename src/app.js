@@ -4,6 +4,8 @@ const sequelize = require('./config/database');
 require('./models/promptVersion.model');
 require('./models/promptStat.model');
 const promptRoutes = require('./routes/prompt.routes');
+const searchRoutes = require('./routes/search.routes');
+const bundleRoutes = require('./routes/bundle.routes');
 const migrateRoutes = require('./routes/migrate.routes');
 const notFound = require('./middlewares/notFound');
 
@@ -11,6 +13,8 @@ const app = express();
 app.use(express.json());
 
 app.use('/prompts', promptRoutes);
+app.use('/search', searchRoutes);
+app.use('/bundles', bundleRoutes);
 app.use('/api', migrateRoutes);
 app.use(notFound);
 
