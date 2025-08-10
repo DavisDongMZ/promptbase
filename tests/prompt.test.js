@@ -129,4 +129,42 @@ describe('Prompt API', () => {
       .expect(200);
     expect(getRes.body.prompts.length).toBe(2);
   });
+
+  it('records likes, uses and ratings', async () => {
+    const res = await request(app)
+      .post('/prompts')
+      .send({ title: 'Stat', body: 'count' })
+      .expect(201);
+
+    const { id } = res.body;
+
+    const like1 = await request(app)
+      .post(`/prompts/${id}/like`)
+      .expect(200);
+    expect(like1.body.stat.likes).toBe(1);
+
+    const use1 = await request(app)
+      .post(`/prompts/${id}/use`)
+      .expect(200);
+    expect(use1.body.stat.uses).toBe(1);
+
+    const rate1 = await request(app)
+      .post(`/prompts/${id}/rating`)
+      .send({ score: 4 })
+      .expect(200);
+    expect(rate1.body.stat.rating_sum).toBe(4);
+    expect(rate1.body.stat.rating_count).toBe(1);
+
+    const rate2 = await request(app)
+      .post(`/prompts/${id}/rating`)
+      .send({ score: 2 })
+      .expect(200);
+    expect(rate2.body.stat.rating_sum).toBe(6);
+    expect(rate2.body.stat.rating_count).toBe(2);
+
+    const like2 = await request(app)
+      .post(`/prompts/${id}/like`)
+      .expect(200);
+    expect(like2.body.stat.likes).toBe(2);
+  });
 });
