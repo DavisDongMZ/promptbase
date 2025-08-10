@@ -19,6 +19,14 @@ router.get('/:id', c.get);
 // PUT /prompts/:id
 router.put('/:id', c.update);
 
+// --- Stats APIs ---
+// POST /prompts/:id/like
+router.post('/:id/like', c.like);
+// POST /prompts/:id/use
+router.post('/:id/use', c.use);
+// POST /prompts/:id/rating  { score: 1..5 }
+router.post('/:id/rating', c.rating);
+
 // List versions
 router.get('/:id/versions', c.listVersions);
 

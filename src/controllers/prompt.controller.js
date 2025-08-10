@@ -9,8 +9,8 @@ exports.create = async (req, res, next) => {
 
 exports.list = async (req, res, next) => {
   try {
-    const { page = 1, size = 20 } = req.query;
-    const prompts = await service.list((page - 1) * size, +size);
+    const { page = 1, size = 20, sort = 'hot' } = req.query;
+    const prompts = await service.list((page - 1) * size, +size, sort);
     res.json(prompts);
   } catch (e) { next(e); }
 };
@@ -36,6 +36,30 @@ exports.remove = async (req, res, next) => {
     const rows = await service.remove(req.params.id);
     if (!rows) return res.status(404).send('Not Found');
     res.status(204).end();
+  } catch (e) { next(e); }
+};
+
+exports.like = async (req, res, next) => {
+  try {
+    const prompt = await service.addLike(req.params.id);
+    if (!prompt) return res.status(404).send('Not Found');
+    res.status(200).json(prompt);
+  } catch (e) { next(e); }
+};
+
+exports.use = async (req, res, next) => {
+  try {
+    const prompt = await service.addUse(req.params.id);
+    if (!prompt) return res.status(404).send('Not Found');
+    res.status(200).json(prompt);
+  } catch (e) { next(e); }
+};
+
+exports.rating = async (req, res, next) => {
+  try {
+    const prompt = await service.addRating(req.params.id, req.body.score);
+    if (!prompt) return res.status(404).send('Not Found');
+    res.status(200).json(prompt);
   } catch (e) { next(e); }
 };
 
