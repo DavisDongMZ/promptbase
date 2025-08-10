@@ -1,0 +1,292 @@
+*** Begin Patch
+*** Add File: src/models/promptStat.model.js
++const { DataTypes } = require('sequelize');
++const sequelize = require('../config/database');
++const Prompt = require('./prompt.model');
++
++/**
++ * 统计数据：每条 Prompt 一行
++ * likes、uses 为累积计数；rating_sum/rating_count 用于求平均分。
++ */
++const PromptStat = sequelize.define('PromptStat', {
++  prompt_id:   { type: DataTypes.INTEGER, allowNull: false, unique: true },
++  likes:       { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
++  uses:        { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
++  rating_sum:  { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
++  rating_count:{ type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
++}, {
++  tableName: 'prompt_stats',
++  underscored: true,
++});
++
++PromptStat.belongsTo(Prompt, { foreignKey: 'prompt_id' });
++Prompt.hasOne(PromptStat, { foreignKey: 'prompt_id', as: 'stat' });
++
++module.exports = PromptStat;
++
+*** End Patch
+*** Update File: src/services/prompt.service.js
+@@
+-const Prompt = require('../models/prompt.model');
+-const Tag = require('../models/tag.model');
+-const PromptVersion = require('../models/promptVersion.model');
+-const diff_match_patch = require('diff-match-patch');
+-const dmp = new diff_match_patch();
++const Prompt = require('../models/prompt.model');
++const Tag = require('../models/tag.model');
++const PromptVersion = require('../models/promptVersion.model');
++const PromptStat = require('../models/promptStat.model');
++const diff_match_patch = require('diff-match-patch');
++const sequelize = require('../config/database');
++const dmp = new diff_match_patch();
+@@
+-const includeTags = { model: Tag, as: 'tags', through: { attributes: [] } };
++const includeTags = { model: Tag, as: 'tags', through: { attributes: [] } };
+ 
+ exports.create = async (data) => {
+   const { tags = [], ...promptData } = data;
+   const prompt = await Prompt.create(promptData);
+   await PromptVersion.create({
+     prompt_id: prompt.id,
+     snapshot_title: prompt.title,
+     snapshot_body: prompt.body,
+     is_snapshot: true,
+     branch: 'main',
+   });
++  // 初始化统计行
++  await PromptStat.findOrCreate({
++    where: { prompt_id: prompt.id },
++    defaults: { likes: 0, uses: 0, rating_sum: 0, rating_count: 0 },
++  });
+   if (tags.length) {
+     const tagInstances = [];
+     for (const t of tags) {
+       let tag;
+       if (typeof t === 'string') {
+         [tag] = await Tag.findOrCreate({ where: { name: t, category: 'general' } });
+       } else {
+         [tag] = await Tag.findOrCreate({
+           where: { name: t.name, category: t.category || 'general' },
+         });
+       }
+       tagInstances.push(tag);
+     }
+     await prompt.addTags(tagInstances);
+   }
+-  return exports.getById(prompt.id);
++  return exports.getById(prompt.id);
+ };
+ 
+-exports.getById = (id) => Prompt.findByPk(id, { include: includeTags });
++exports.getById = (id) =>
++  Prompt.findByPk(id, { include: [includeTags, { model: PromptStat, as: 'stat' }] });
+ 
+-exports.list = (offset = 0, limit = 20) =>
+-  Prompt.findAll({ offset, limit, order: [['created_at', 'DESC']], include: includeTags });
++/**
++ * 列表排序：
++ *  - hot：根据 likes、uses、rating_avg 组合排序
++ *  - rating：评分优先
++ *  - new：按创建时间
++ */
++exports.list = (offset = 0, limit = 20, sort = 'hot') => {
++  // 评分平均值
++  const ratingAvg =
++    'CASE WHEN stat.rating_count > 0 THEN 1.0 * stat.rating_sum / stat.rating_count ELSE 0 END';
++  // 热度得分（可按需调整系数）
++  const hotScore = `COALESCE(stat.likes,0) * 2 + COALESCE(stat.uses,0) + (${ratingAvg}) * 3`;
++
++  let order;
++  if (sort === 'rating') {
++    order = [[sequelize.literal(ratingAvg), 'DESC'], ['created_at', 'DESC']];
++  } else if (sort === 'new') {
++    order = [['created_at', 'DESC']];
++  } else {
++    order = [[sequelize.literal(hotScore), 'DESC'], ['created_at', 'DESC']];
++  }
++
++  return Prompt.findAll({
++    offset,
++    limit,
++    include: [includeTags, { model: PromptStat, as: 'stat' }],
++    order,
++    subQuery: false,
++  });
++};
+@@
+ exports.getVersionById = (id) => PromptVersion.findByPk(id);
+@@
+   return { title, body };
+ };
+@@
+   return exports.getById(id);
+ };
+ 
+ exports.remove = (id) => Prompt.destroy({ where: { id } });
+ 
+ exports.createBranch = async (promptId, fromVersionId, branchName) => {
+   const base = await exports.reconstructVersion(fromVersionId);
+   if (!base) return null;
+   await PromptVersion.create({
+     prompt_id: promptId,
+     parent_id: fromVersionId,
+     branch: branchName,
+     snapshot_title: base.title,
+     snapshot_body: base.body,
+     is_snapshot: true,
+   });
+   return exports.getVersions(promptId, branchName);
+ };
++
++// -------- 统计写入 API --------
++async function ensureStat(promptId) {
++  const [stat] = await PromptStat.findOrCreate({
++    where: { prompt_id: promptId },
++    defaults: { likes: 0, uses: 0, rating_sum: 0, rating_count: 0 },
++  });
++  return stat;
++}
++
++exports.addLike = async (id) => {
++  const stat = await ensureStat(id);
++  await stat.increment('likes', { by: 1 });
++  return exports.getById(id);
++};
++
++exports.addUse = async (id) => {
++  const stat = await ensureStat(id);
++  await stat.increment('uses', { by: 1 });
++  return exports.getById(id);
++};
++
++exports.addRating = async (id, score) => {
++  const s = Number(score);
++  if (!Number.isFinite(s) || s < 1 || s > 5) {
++    throw new Error('score must be an integer in [1,5]');
++  }
++  const stat = await ensureStat(id);
++  await stat.increment({ rating_sum: s, rating_count: 1 });
++  return exports.getById(id);
++};
+ 
+*** End Patch
+*** Update File: src/controllers/prompt.controller.js
+@@
+ exports.list = async (req, res, next) => {
+   try {
+-    const { page = 1, size = 20 } = req.query;
+-    const prompts = await service.list((page - 1) * size, +size);
++    const { page = 1, size = 20, sort = 'hot' } = req.query;
++    const prompts = await service.list((page - 1) * size, +size, sort);
+     res.json(prompts);
+   } catch (e) { next(e); }
+ };
+@@
+   } catch (e) { next(e); }
+ };
+ 
++exports.like = async (req, res, next) => {
++  try {
++    const prompt = await service.addLike(req.params.id);
++    if (!prompt) return res.status(404).send('Not Found');
++    res.status(200).json(prompt);
++  } catch (e) { next(e); }
++};
++
++exports.use = async (req, res, next) => {
++  try {
++    const prompt = await service.addUse(req.params.id);
++    if (!prompt) return res.status(404).send('Not Found');
++    res.status(200).json(prompt);
++  } catch (e) { next(e); }
++};
++
++exports.rating = async (req, res, next) => {
++  try {
++    const prompt = await service.addRating(req.params.id, req.body.score);
++    if (!prompt) return res.status(404).send('Not Found');
++    res.status(200).json(prompt);
++  } catch (e) { next(e); }
++};
++
+*** End Patch
+*** Update File: src/routes/prompt.routes.js
+@@
+ const router = Router();
+ 
+ // Create a new Prompt
+ // POST /prompts
+ router.post('/', c.create);
+ 
+ // List all Prompts (with optional pagination via query params ?page=&size=)
+ // GET /prompts
+ router.get('/', c.list);
+ 
+ // Retrieve a single Prompt by its ID
+ // GET /prompts/:id
+ router.get('/:id', c.get);
+ 
+ // Replace an existing Prompt completely by its ID
+ // PUT /prompts/:id
+ router.put('/:id', c.update);
+ 
++// --- Stats APIs ---
++// POST /prompts/:id/like
++router.post('/:id/like', c.like);
++// POST /prompts/:id/use
++router.post('/:id/use', c.use);
++// POST /prompts/:id/rating  { score: 1..5 }
++router.post('/:id/rating', c.rating);
++
+ // List versions
+ router.get('/:id/versions', c.listVersions);
+ 
+ // Get a reconstructed version
+ router.get('/:id/versions/:versionId', c.getVersion);
+ 
+ // Restore to a version
+ router.post('/:id/versions/:versionId/restore', c.restoreVersion);
+ 
+ // Create a new branch
+ router.post('/:id/branches', c.branch);
+ 
+ // Remove a Prompt by its ID
+ // DELETE /prompts/:id
+ router.delete('/:id', c.remove);
+ 
+ module.exports = router;
+ 
+*** End Patch
+*** Update File: src/routes/migrate.routes.js
+@@
+-const { Router } = require('express');
+-const sequelize = require('../config/database');
+-require('../models/prompt.model');
+-require('../models/tag.model');
+-require('../models/promptVersion.model');
++const { Router } = require('express');
++const sequelize = require('../config/database');
++require('../models/prompt.model');
++require('../models/tag.model');
++require('../models/promptVersion.model');
++require('../models/promptStat.model');
+*** End Patch
+*** Update File: src/app.js
+@@
+-const express = require('express');
+-require('dotenv').config();
+-const sequelize = require('./config/database');
+-require('./models/promptVersion.model');
+-const promptRoutes = require('./routes/prompt.routes');
+-const migrateRoutes = require('./routes/migrate.routes');
+-const notFound = require('./middlewares/notFound');
++const express = require('express');
++require('dotenv').config();
++const sequelize = require('./config/database');
++require('./models/promptVersion.model');
++require('./models/promptStat.model');
++const promptRoutes = require('./routes/prompt.routes');
++const migrateRoutes = require('./routes/migrate.routes');
++const notFound = require('./middlewares/notFound');
+*** End Patch
+
